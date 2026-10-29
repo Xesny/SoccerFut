@@ -9,13 +9,34 @@
 </head>
 <body>
   <main class="game">
+    <section class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="introTitle">
+      <div class="intro-card">
+        <div class="intro-ball" aria-hidden="true">⚽</div>
+        <p class="eyebrow">DESAFIO DO PÊNALTI</p>
+        <h2 id="introTitle">Pronto para marcar?</h2>
+        <p class="intro-copy">Escolha seu país. As cores da camisa do seu personagem vão representar seu time.</p>
+        <div class="theme-setting" role="group" aria-label="Tema do jogo">
+          <span>Tema</span><div class="theme-options"><button class="theme-choice active" type="button" data-theme-choice="light" aria-pressed="true">☀️ Claro</button><button class="theme-choice" type="button" data-theme-choice="dark" aria-pressed="false">🌙 Escuro</button></div>
+        </div>
+        <div class="country-grid" role="group" aria-label="Escolha seu país">
+          <button class="country selected" type="button" data-country="Brasil" data-kit="#e1bd36" data-trim="#16824a" aria-pressed="true"><span class="flag">🇧🇷</span><span>Brasil</span></button>
+          <button class="country" type="button" data-country="Argentina" data-kit="#7bc6df" data-trim="#f5f0df" aria-pressed="false"><span class="flag">🇦🇷</span><span>Argentina</span></button>
+          <button class="country" type="button" data-country="França" data-kit="#3155a4" data-trim="#f4f0df" aria-pressed="false"><span class="flag">🇫🇷</span><span>França</span></button>
+          <button class="country" type="button" data-country="Portugal" data-kit="#21804d" data-trim="#c83d36" aria-pressed="false"><span class="flag">🇵🇹</span><span>Portugal</span></button>
+          <button class="country" type="button" data-country="Japão" data-kit="#f3f0e8" data-trim="#c93e46" aria-pressed="false"><span class="flag">🇯🇵</span><span>Japão</span></button>
+          <button class="country" type="button" data-country="Alemanha" data-kit="#d8bf43" data-trim="#242b2a" aria-pressed="false"><span class="flag">🇩🇪</span><span>Alemanha</span></button>
+        </div>
+        <button class="start-game" id="startGame" type="button">Começar jogo <span aria-hidden="true">→</span></button>
+      </div>
+    </section>
     <header>
       <div class="brand"><div class="brand-icon" aria-hidden="true">⚽</div><div><h1>Chute no Gol</h1><div class="subtitle">Desafio do pênalti</div></div></div>
-      <div class="scoreboard" aria-label="Placar"><div><div class="score-label">Gols</div><div class="score" id="goals">0</div></div><div class="divider"></div><div><div class="score-label">Chutes</div><div class="score" id="shots">0</div></div></div>
+      <div class="header-actions"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Mudar para tema escuro">🌙 <span>Escuro</span></button><div class="scoreboard" aria-label="Placar"><div><div class="score-label">Gols</div><div class="score" id="goals">0</div></div><div class="divider"></div><div><div class="score-label">Chutes</div><div class="score" id="shots">0</div></div></div></div>
     </header>
     <section class="arena" aria-label="Campo de futebol">
       <div class="topline"><span class="badge">🥅 &nbsp; <strong>Marque mais que o goleiro!</strong></span><span class="badge" id="round">PRONTO</span></div>
       <div class="pitch" id="pitch">
+        <div class="stadium" aria-hidden="true"><div class="crowd"></div><div class="floodlight left"></div><div class="floodlight right"></div></div>
         <div class="goal"><div class="net"></div></div><div class="goal-floor"></div>
         <div class="keeper" id="keeper" aria-label="Goleiro"><div class="head"></div><div class="hair"></div><div class="body"></div><div class="arm left"></div><div class="arm right"></div><div class="glove left"></div><div class="glove right"></div></div>
         <div class="impact" id="impact" hidden></div><div class="aim-line" id="aimLine" hidden></div>
@@ -40,8 +61,36 @@
       const shotsEl = document.querySelector('#shots');
       const roundEl = document.querySelector('#round');
       const hint = document.querySelector('#hint');
+      const intro = document.querySelector('#intro');
+      const themeToggle = document.querySelector('#themeToggle');
+      let selectedCountry = document.querySelector('.country.selected');
       const start = { x: .5, y: .81 };
       let dragging = false, busy = false, pointerId = null, goals = 0, shots = 0, roundTimer;
+
+      function setTheme(theme) {
+        document.body.dataset.theme = theme;
+        document.querySelectorAll('[data-theme-choice]').forEach(button => {
+          const active = button.dataset.themeChoice === theme;
+          button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
+        });
+        themeToggle.innerHTML = theme === 'dark' ? '☀️ <span>Claro</span>' : '🌙 <span>Escuro</span>';
+        themeToggle.setAttribute('aria-label', theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro');
+      }
+      document.querySelectorAll('[data-theme-choice]').forEach(button => button.addEventListener('click', () => setTheme(button.dataset.themeChoice)));
+      themeToggle.addEventListener('click', () => setTheme(document.body.dataset.theme === 'dark' ? 'light' : 'dark'));
+
+      document.querySelectorAll('.country').forEach(option => option.addEventListener('click', () => {
+        const previous = document.querySelector('.country.selected');
+        previous?.classList.remove('selected'); previous?.setAttribute('aria-pressed', 'false');
+        option.classList.add('selected'); option.setAttribute('aria-pressed', 'true'); selectedCountry = option;
+      }));
+      document.querySelector('#startGame').addEventListener('click', () => {
+        document.documentElement.style.setProperty('--kit', selectedCountry.dataset.kit);
+        document.documentElement.style.setProperty('--kit-trim', selectedCountry.dataset.trim);
+        document.querySelector('.badge').textContent = `⚽  Time ${selectedCountry.dataset.country}`;
+        intro.classList.add('dismissed');
+        setTimeout(() => intro.remove(), 300);
+      });
 
       function placeBall(x = start.x, y = start.y) {
         ball.style.left = `${x * 100}%`; ball.style.top = `${y * 100}%`;
@@ -76,28 +125,24 @@
         // The release vector determines where the ball crosses the goal line.
         const t = (start.y - .19) / Math.max(.08, forward);
         const targetX = start.x + dx * t;
-        const targetY = .19;
+        const targetY = Math.max(.09, Math.min(.31, .35 - forward * .30));
         // Leave room for the post and the ball's visible radius at the goal line.
         const goalEdge = (.14 * pitch.clientWidth + 7 + 7.2) / pitch.clientWidth;
         const inside = targetX >= goalEdge && targetX <= 1 - goalEdge;
-        const offsetFromCenter = Math.abs(targetX - .5);
-        const cornerFactor = Math.max(0, Math.min(1, (offsetFromCenter - .10) / .28));
         const weak = strength < .3;
-        // Central and soft shots vary from attempt to attempt. A hard shot in
-        // the corner is almost never reachable, even when the keeper guesses right.
-        let saveChance = .12 + (1 - strength) * .40 + (1 - cornerFactor) * .32 - cornerFactor * strength * .60;
-        saveChance = Math.max(.015, Math.min(.88, saveChance));
-        const saved = inside && Math.random() < saveChance;
+        const travel = 430 + (1 - strength) * 510;
         const keeperStartX = .5;
-        const keeperReach = weak ? .31 : .25;
-        const keeperLandingX = saved
-          ? targetX
-          : keeperStartX + Math.sign(targetX - keeperStartX) * Math.min(Math.abs(targetX - keeperStartX), keeperReach);
+        const horizontalGap = Math.abs(targetX - keeperStartX);
+        const keeperReach = Math.max(.10, Math.min(.37, (travel - 150) / 1000 * .48));
+        const heightGap = Math.max(0, .12 - targetY, targetY - .29);
+        const canReach = horizontalGap <= keeperReach && heightGap < .11;
+        const saveChance = canReach ? Math.max(.06, .86 - horizontalGap / keeperReach * .48 - heightGap * 2.2) : 0;
+        const saved = inside && Math.random() < saveChance;
+        const keeperLandingX = keeperStartX + Math.sign(targetX - keeperStartX) * Math.min(horizontalGap, keeperReach);
         const diveDir = targetX < keeperStartX ? 'dive-left' : 'dive-right';
         keeper.style.left = `${keeperLandingX * 100}%`;
         keeper.classList.add(diveDir);
         const destX = Math.max(.04, Math.min(.96, targetX));
-        const travel = 520 + (1 - strength) * 520;
         const ballRect = pitch.getBoundingClientRect();
         const fromX = start.x * ballRect.width, fromY = start.y * ballRect.height;
         const toX = destX * ballRect.width, toY = targetY * ballRect.height;
