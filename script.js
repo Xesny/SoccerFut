@@ -8,9 +8,11 @@
 const Physics = (() => {
   const G = 9.81;
   const R = 0.11;               // raio da bola
-  const DRAG = 0.0125;          // arrasto quadrático (≈ Cd 0,25)
-  const MAGNUS = 0.0052;        // efeito Magnus: a = k · (ω × v)
-  const SPIN_DECAY = 0.25;
+  // Arrasto: k = ½·ρ·A/m ≈ 0,053 (bola de 430 g, 22 cm). O Cd cai de ~0,45 para ~0,2
+  // acima de ~11 m/s (crise do arrasto): chute forte "voa" e a bola lenta freia e cai.
+  const AIR_K = 0.053;
+  const MAGNUS = 0.0050;        // efeito Magnus: a = k · (ω × v)
+  const SPIN_DECAY = 0.22;      // perda de rotação por segundo
   const GOAL_HALF = 3.66, GOAL_H = 2.44, POST_R = 0.06, NET_DEPTH = 2.0;
   const POST_X = GOAL_HALF + POST_R, BAR_Y = GOAL_H + POST_R;
   const KEEPER_Z = 0.35, KEEPER_R = 0.26, KEEPER_LEN = 2.25;
@@ -31,19 +33,45 @@ const Physics = (() => {
     return clamp(Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v), -3, 3);
   }
 
-  // Gravidade + arrasto + Magnus
-  function accel(v, w) {
-    const s = len(v);
-    return v3(
-      -DRAG * s * v.x + MAGNUS * (w.y * v.z - w.z * v.y),
-      -G - DRAG * s * v.y + MAGNUS * (w.z * v.x - w.x * v.z),
-      -DRAG * s * v.z + MAGNUS * (w.x * v.y - w.y * v.x),
+  const dragCoef = (s) => 0.2 + 0.25 / (1 + Math.exp((s - 11) / 1.3));
+
+  // Gravidade + arrasto + Magnus (+ oscilação da "bola flutuante", se houver)
+  function accel(v, w, kn, t) {
+    const s = len(v), d = AIR_K * dragCoef(s) * s;
+    const a = v3(
+      -d * v.x + MAGNUS * (w.y * v.z - w.z * v.y),
+      -G - d * v.y + MAGNUS * (w.z * v.x - w.x * v.z),
+      -d * v.z + MAGNUS * (w.x * v.y - w.y * v.x),
     );
+    if (kn) {
+      // Bola quase sem rotação e muito rápida: o descolamento do ar alterna de lado
+      // e gera forças laterais imprevisíveis (o "chute de bico/trivela flutuante").
+      const k = kn.amp * clamp((s - 18) / 10, 0, 1);
+      a.x += k * Math.sin(kn.f1 * t + kn.p1);
+      a.y += k * 0.6 * Math.sin(kn.f2 * t + kn.p2);
+    }
+    return a;
   }
   function integrate(b, dt) {
-    b.v = add(b.v, mul(accel(b.v, b.w), dt));
+    b.v = add(b.v, mul(accel(b.v, b.w, b.kn, b.t || 0), dt));
     b.p = add(b.p, mul(b.v, dt));
     b.w = mul(b.w, 1 - SPIN_DECAY * dt);
+  }
+
+  // Rotação realista a partir do efeito lateral do gesto: chute de chapa curvado tem o eixo
+  // inclinado (topspin) e a bola "mergulha"; chute seco ganha leve topspin.
+  function spinVector(side, speed) {
+    const top = -(0.32 * Math.abs(side) + 0.25 * Math.max(0, speed - 22));
+    return v3(top, side, 0);
+  }
+  // Parâmetros da bola flutuante (só com pouquíssima rotação e chute forte).
+  function knuckle(w, speed, rnd = Math.random) {
+    if (Math.abs(w.y) > 8 || speed < 26) return null;
+    return {
+      amp: 2.2 + rnd() * 1.6,
+      f1: 2 * Math.PI * (0.7 + rnd() * 0.6), p1: rnd() * Math.PI * 2,
+      f2: 2 * Math.PI * (0.8 + rnd() * 0.7), p2: rnd() * Math.PI * 2,
+    };
   }
 
   // Simula até a bola cruzar o plano z = zPlane; devolve {x, y, t} ou null.
@@ -52,7 +80,7 @@ const Physics = (() => {
     let t = 0;
     while (t < maxT) {
       const prev = b.p;
-      integrate(b, DT); t += DT;
+      integrate(b, DT); t += DT;   // sem flutuação: o goleiro não consegue prever
       if (bounce && b.p.y < R) { b.p.y = R; if (b.v.y < 0) b.v.y = -b.v.y * 0.5; b.v.x *= 0.9; b.v.z *= 0.9; }
       if (b.p.z <= zPlane) {
         const k = (prev.z - zPlane) / (prev.z - b.p.z);
@@ -68,11 +96,10 @@ const Physics = (() => {
   }
 
   // Acha direção (yaw/pitch) para que a bola, com essa velocidade e efeito, passe pelo alvo.
-  function solveLaunch(B, T, speed, wy) {
+  function solveLaunch(B, T, speed, w) {
     const D = Math.hypot(T.x - B.x, B.z - T.z);
     let yaw = Math.atan2(T.x - B.x, B.z - T.z);
     let pitch = Math.atan2(T.y - B.y, D) + 0.05;
-    const w = v3(0, wy, 0);
     for (let i = 0; i < 18; i++) {
       const c = crossPlane(B, launchVel(speed, yaw, pitch), w, T.z, false);
       if (!c) { pitch = Math.min(0.8, pitch + 0.08); continue; }
@@ -143,7 +170,7 @@ const Physics = (() => {
       if (rnd() < diff.guess) { tx = pred.x + gauss(rnd) * 0.4; ty = pred.y + gauss(rnd) * 0.35; }
       else { const r = rnd(); tx = r < 0.2 ? x0 : (r < 0.6 ? -1 : 1) * (1.5 + rnd() * 1.8); ty = 0.3 + rnd() * 1.7; }
     } else {
-      const sigma = 0.18 + 0.4 * Math.abs(launch.w.y) / MAX_SPIN + (kick.wall ? 0.12 : 0) + 0.012 * Math.max(0, speed - 20);
+      const sigma = 0.18 + 0.4 * Math.abs(launch.w.y) / MAX_SPIN + (kick.wall ? 0.12 : 0) + 0.012 * Math.max(0, speed - 20) + (launch.kn ? 0.15 : 0);
       tx = pred.x + gauss(rnd) * sigma;
       ty = pred.y + gauss(rnd) * sigma * 0.6;
     }
@@ -198,7 +225,7 @@ const Physics = (() => {
   // ---------- Voo da bola com tudo (barreira, goleiro, traves, rede) ----------
   function createShot(kick, wall, keeper, launch) {
     return {
-      p: { ...launch.p }, v: { ...launch.v }, w: { ...launch.w }, t: 0,
+      p: { ...launch.p }, v: { ...launch.v }, w: { ...launch.w }, t: 0, kn: launch.kn || null,
       startZ: launch.p.z, kick, wall, keeper,
       flags: { wall: false, keeper: false, post: false },
       crossed: false, inGoal: false, caught: false, outcome: null, events: [], maxSpeed: len(launch.v),
@@ -284,14 +311,15 @@ const Physics = (() => {
     // sem desfecho ainda: parou, voltou ou demorou demais
     if (!S.outcome) {
       const stopped = len(S.v) < 0.6 && S.p.y <= R + 0.01;
-      if (S.t > 4 || stopped || S.p.z > S.startZ + 3 || (S.flags.keeper && S.v.z > 0 && S.t > 0.4)) setOutcome(S, fallback(S));
+      const deflected = (S.flags.keeper && S.v.z > 0 && S.t > 0.4) || (S.flags.wall && S.v.z > -3 && S.t > 0.6);
+      if (S.t > 4 || stopped || S.p.z > S.startZ + 3 || deflected) setOutcome(S, fallback(S));
     }
   }
 
   return {
     R, GOAL_HALF, GOAL_H, POST_R, POST_X, BAR_Y, NET_DEPTH, KEEPER_Z, KEEPER_LEN, WALL_DIST, MAX_SPIN, DT,
     v3, add, sub, mul, dot, len, clamp, lerp, gauss,
-    crossPlane, launchVel, solveLaunch, makeKick, buildWall, wallJump,
+    crossPlane, launchVel, solveLaunch, spinVector, knuckle, makeKick, buildWall, wallJump,
     keeperIdle, keeperPlan, keeperPose, createShot, stepShot,
   };
 })();
@@ -375,23 +403,23 @@ if (typeof window !== 'undefined') (() => {
   function cameraFor(kick) {
     const B = kick.ball, hl = Math.hypot(B.x, B.z);
     const h = { x: -B.x / hl, z: -B.z / hl };
-    const back = kick.type === 'penalty' ? 4.6 : 5.2;
+    const back = kick.type === 'penalty' ? 6.5 : 7.5;
     return {
-      pos: v3(B.x - h.x * back, 1.75, B.z - h.z * back),
+      pos: v3(B.x - h.x * back, 1.6, B.z - h.z * back),
       look: v3(0, 1.0, 0),
       intro: v3(B.x - h.x * (back + 4), 3.2, B.z - h.z * (back + 4)),
     };
   }
 
   function layoutCamera() {
-    cam.f = Math.min(H * 1.7, W * 1.9);
+    cam.f = Math.min(H * 1.4, W * 1.85);
     cam.cx = W / 2;
     if (!S.kick) { cam.cy = H * 0.35; return; }
     const base = cameraFor(S.kick);
     setCamera(base.pos, base.look);
     cam.cy = 0;
     const c = toCam(v3(S.kick.ball.x, P.R, S.kick.ball.z));
-    cam.cy = H * 0.8 + cam.f * c.y / c.z;          // bola sempre a ~80% da altura da tela
+    cam.cy = H * 0.82 + cam.f * c.y / c.z;         // bola sempre a ~82% da altura da tela
     cam.base = base;
   }
 
@@ -404,34 +432,54 @@ if (typeof window !== 'undefined') (() => {
   }
 
   // ---------- Texturas geradas ----------
-  function makeCrowd() {
-    const c = document.createElement('canvas'); c.width = 1600; c.height = 360;
+  // Torcida alvinegra (estádio inspirado na Arena de Itaquera): camisas pretas e brancas,
+  // cadeiras cinza-escuro e alguns bandeirões listrados cobrindo vários degraus.
+  function makeCrowd(w = 1600, rows = 40, flags = 5) {
+    const rowH = 14, c = document.createElement('canvas'); c.width = w; c.height = rows * rowH + 10;
     const g = c.getContext('2d');
-    const grd = g.createLinearGradient(0, 0, 0, c.height);
-    grd.addColorStop(0, '#0b0f1a'); grd.addColorStop(1, '#1b2232');
-    g.fillStyle = grd; g.fillRect(0, 0, c.width, c.height);
-    const shirts = ['#e8c547', '#2a9d5c', '#d9dde3', '#3a6fd8', '#c0392b', '#f39c12', '#8e44ad', '#ecf0f1', '#16a085'];
-    for (let row = 0; row < 26; row++) {
-      const y = 12 + row * 13.5;
-      g.fillStyle = row % 2 ? '#141a27' : '#181f2e';
-      g.fillRect(0, y + 8, c.width, 5);
-      for (let x = (row % 2) * 4; x < c.width; x += 8 + Math.random() * 3) {
-        if (Math.random() < 0.08) continue;
-        const light = 0.55 + row / 26 * 0.45;
+    g.fillStyle = '#15181d'; g.fillRect(0, 0, c.width, c.height);
+    const shirts = ['#f2f2f2', '#f2f2f2', '#e6e6e6', '#111214', '#111214', '#1a1b1e', '#8c9096', '#f2f2f2', '#111214', '#2a2b2f'];
+    const skins = ['#e0b48f', '#8d5a3b', '#c68c66', '#5b3a29', '#f1c9a5'];
+    for (let row = 0; row < rows; row++) {
+      const y = 6 + row * rowH;
+      g.fillStyle = row % 2 ? '#24282f' : '#2b3038';           // degrau / cadeiras
+      g.fillRect(0, y + 9, c.width, 5);
+      const light = 0.5 + (row / rows) * 0.38;                 // mais perto = mais iluminado
+      for (let x = (row % 2) * 4; x < c.width; x += 7.5 + Math.random() * 2.5) {
+        if (Math.random() < 0.05) continue;
         g.globalAlpha = light;
         g.fillStyle = shirts[(Math.random() * shirts.length) | 0];
-        g.fillRect(x, y + 3, 6, 7);
-        g.fillStyle = ['#e0b48f', '#8d5a3b', '#c68c66', '#5b3a29'][(Math.random() * 4) | 0];
+        g.fillRect(x, y + 3, 6, 8);
+        g.fillStyle = skins[(Math.random() * skins.length) | 0];
         g.beginPath(); g.arc(x + 3, y + 1.5, 2.6, 0, Math.PI * 2); g.fill();
+        if (Math.random() < 0.06) { g.fillRect(x + (Math.random() < 0.5 ? -1 : 6), y - 4, 2, 6); } // braço erguido
       }
     }
     g.globalAlpha = 1;
+    // bandeirões listrados
+    for (let k = 0; k < flags; k++) {
+      const fw = 90 + Math.random() * 110, fh = 60 + Math.random() * 80;
+      const fx = (k + 0.2 + Math.random() * 0.6) * (c.width / flags) - fw / 2, fy = 20 + Math.random() * (c.height - fh - 40);
+      g.save(); g.translate(fx, fy);
+      const stripes = 5 + ((Math.random() * 4) | 0);
+      const wave = (x) => Math.sin(x * 0.08) * 3;
+      for (let i = 0; i < stripes; i++) {
+        g.fillStyle = i % 2 ? '#0d0e10' : '#f4f4f4';
+        const x0 = (i / stripes) * fw, x1 = ((i + 1) / stripes) * fw;
+        g.beginPath();
+        g.moveTo(x0, wave(x0)); g.lineTo(x1, wave(x1)); g.lineTo(x1, fh + wave(x1)); g.lineTo(x0, fh + wave(x0));
+        g.closePath(); g.fill();
+      }
+      g.globalAlpha = 0.25; g.fillStyle = '#000'; g.fillRect(0, fh * 0.7, fw, fh * 0.3); // sombra das dobras
+      g.restore(); g.globalAlpha = 1;
+    }
     return c;
   }
+  // Placas de LED atrás do gol
   function makeBoards() {
     const c = document.createElement('canvas'); c.width = 2400; c.height = 60;
     const g = c.getContext('2d');
-    const ads = [['CHUTE NO GOL', '#0d1b3d', '#5ee0ff'], ['FUTEBOL ARCADE', '#1b0d33', '#d6ff3d'], ['GOLAÇO', '#3d0d16', '#ffd166'], ['NO ÂNGULO', '#0d3324', '#7dffb2']];
+    const ads = [['CHUTE NO GOL', '#0b0b0d', '#ffffff'], ['ITAQUERA · SP', '#f2f2f2', '#111111'], ['GOLAÇO', '#0b0b0d', '#ffd166'], ['FIEL TORCIDA', '#1c1c20', '#ffffff']];
     const seg = c.width / 8;
     for (let i = 0; i < 8; i++) {
       const [txt, bg, fg] = ads[i % ads.length];
@@ -439,11 +487,40 @@ if (typeof window !== 'undefined') (() => {
       g.fillStyle = fg; g.font = '900 italic 34px "Segoe UI", system-ui, sans-serif';
       g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(txt, i * seg + seg / 2, c.height / 2 + 2);
-      g.fillStyle = '#ffffff22'; g.fillRect(i * seg, 0, 2, c.height);
+      g.fillStyle = 'rgba(128,128,128,.12)';
+      for (let y = 0; y < c.height; y += 3) g.fillRect(i * seg, y, seg, 1);   // textura de LED
     }
     return c;
   }
-  const TEX = { crowd: null, boards: null };
+  // Telão: redesenhado a cada quadro com o placar da série
+  const ABBR = { Brasil: 'BRA', Argentina: 'ARG', 'França': 'FRA', Portugal: 'POR', 'Japão': 'JPN', Alemanha: 'ALE' };
+  function makeScreen() { const c = document.createElement('canvas'); c.width = 640; c.height = 240; return c; }
+  function paintScreen(c) {
+    const g = c.getContext('2d'), w = c.width, h = c.height;
+    g.fillStyle = '#05070a'; g.fillRect(0, 0, w, h);
+    const goals = S.results.filter(Boolean).length;
+    const party = (S.crowdJump || 0) > 0 && Math.sin(S.time * 14) > -0.2;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    if (party) {
+      g.fillStyle = '#f4f4f4'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#0b0b0d'; g.font = '900 italic 150px "Segoe UI", system-ui, sans-serif';
+      g.fillText('GOL!', w / 2, h / 2 + 8);
+    } else {
+      g.fillStyle = '#1a1d24'; g.fillRect(0, 0, w, 54);
+      g.fillStyle = '#cfd5df'; g.font = '800 30px "Segoe UI", system-ui, sans-serif';
+      g.fillText(`COBRANÇA ${Math.min(S.index + 1, KICKS)}/${KICKS}`, w / 2, 29);
+      g.font = '900 96px "Segoe UI", system-ui, sans-serif';
+      g.fillStyle = '#ffffff'; g.fillText(ABBR[S.team] || 'BRA', w * 0.22, 140);
+      g.fillStyle = '#ffd166'; g.fillText(String(goals), w * 0.5, 140);
+      g.fillStyle = '#8b93a3'; g.font = '800 34px "Segoe UI", system-ui, sans-serif';
+      g.fillText(`${S.points} PTS`, w * 0.79, 140);
+      g.font = '700 22px "Segoe UI", system-ui, sans-serif';
+      g.fillText('GOLS', w * 0.5, 210);
+    }
+    g.fillStyle = 'rgba(0,0,0,.28)';
+    for (let y = 0; y < h; y += 4) g.fillRect(0, y, w, 1.5);                 // linhas de LED
+  }
+  const TEX = { crowd: null, crowdSide: null, boards: null, screen: null };
 
   // ---------- Desenho: primitivas 3D ----------
   function polyScreen(pts) {
@@ -489,57 +566,115 @@ if (typeof window !== 'undefined') (() => {
     ctx.lineWidth = typeof width === 'function' ? width((pa.s + pb.s) / 2) : width;
     ctx.strokeStyle = style; ctx.stroke();
   }
-  // Mapeia uma textura sobre um quadrilátero vertical, em faixas (aproximação afim).
-  function texturedWall(img, x0, x1, bottom, top, strips, sx0 = 0, sx1 = img.width) {
+  // Mapeia uma textura sobre um quadrilátero 3D em faixas (aproximação afim por faixa).
+  // A→B é a borda de baixo da textura, C→D a de cima (C fica sobre A).
+  function texturedQuad(img, A, B, C, D, strips, sx0 = 0, sx1 = img.width) {
+    const L = (a, b, t) => v3(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t));
+    const srcW = (sx1 - sx0) / strips;
     for (let i = 0; i < strips; i++) {
       const ta = i / strips, tb = (i + 1) / strips;
-      const bl = proj(v3(lerp(x0, x1, ta), bottom.y, bottom.z));
-      const br = proj(v3(lerp(x0, x1, tb), bottom.y, bottom.z));
-      const tl = proj(v3(lerp(x0, x1, ta), top.y, top.z));
+      const bl = proj(L(A, B, ta)), br = proj(L(A, B, tb)), tl = proj(L(C, D, ta));
       if (!bl || !br || !tl) continue;
-      const srcX = lerp(sx0, sx1, ta), srcW = (sx1 - sx0) / strips;
+      if (Math.max(bl.x, br.x, tl.x) < -50 || Math.min(bl.x, br.x, tl.x) > W + 50) continue;
+      const srcX = lerp(sx0, sx1, ta);
       ctx.save();
       ctx.setTransform((br.x - bl.x) / srcW, (br.y - bl.y) / srcW, (tl.x - bl.x) / -img.height, (tl.y - bl.y) / -img.height, bl.x, bl.y);
-      ctx.drawImage(img, srcX, 0, srcW + 0.6, img.height, 0, -img.height, srcW + 0.6, img.height);
+      ctx.drawImage(img, srcX, 0, Math.min(srcW + 0.6, img.width - srcX), img.height, 0, -img.height, srcW + 0.6, img.height);
       ctx.restore();
     }
+  }
+  function texturedWall(img, x0, x1, bottom, top, strips, sx0, sx1) {
+    texturedQuad(img, v3(x0, bottom.y, bottom.z), v3(x1, bottom.y, bottom.z), v3(x0, top.y, top.z), v3(x1, top.y, top.z), strips, sx0, sx1);
+  }
+  function glow(p3, size, color, alpha = 1) {
+    const p = proj(p3);
+    if (!p) return;
+    const r = Math.max(3 * DPR, p.s * size);
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+    g.addColorStop(0, `rgba(${color},${alpha})`); g.addColorStop(0.18, `rgba(${color},${alpha * 0.45})`); g.addColorStop(1, `rgba(${color},0)`);
+    ctx.fillStyle = g; ctx.fillRect(p.x - r, p.y - r, r * 2, r * 2);
   }
 
   // ---------- Cena ----------
   function drawSky() {
+    // noite em São Paulo: céu escuro com o brilho alaranjado da cidade no horizonte
     const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#04060c'); g.addColorStop(0.45, '#0e1626'); g.addColorStop(1, '#13202a');
+    g.addColorStop(0, '#05070d'); g.addColorStop(0.35, '#0c1220'); g.addColorStop(0.62, '#2a2230'); g.addColorStop(1, '#1a1a22');
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   }
+
+  // Geometria do estádio (metros). Atrás do gol: arquibancada única e íngreme com telão no topo;
+  // laterais com anel inferior, faixa de camarotes envidraçados e anel superior; cobertura
+  // branca com treliças e os refletores no beiral.
+  const ST = {
+    backFront: -7, backTop: { y: 16, z: -23 }, backHalf: 62,
+    sideIn: 40, sideZ0: -7, sideZ1: 75,
+    lower: { x: 51, y: 9.5 }, boxes: { x: 52, y0: 9.5, y1: 13 }, upper: { x: 63, y: 23 },
+    roofFront: { y: 25, z: -19 }, roofBack: { y: 26.5, z: -31 }, sideRoof: { x0: 46, x1: 68, y0: 28, y1: 29.5 },
+  };
   function drawStadium() {
-    // arquibancada atrás do gol (inclinada para trás)
-    texturedWall(TEX.crowd, -95, 95, v3(0, 0.9, -9), v3(0, 19, -34), 40);
-    // marquise
-    fillPoly([v3(-95, 19, -34), v3(95, 19, -34), v3(95, 21.5, -30), v3(-95, 21.5, -30)], '#0a0d14');
-    // refletores
-    for (const x of [-48, -16, 16, 48]) {
-      const p = proj(v3(x, 23, -33));
-      if (!p) continue;
-      const r = Math.max(12, p.s * 7);
-      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3);
-      g.addColorStop(0, 'rgba(255,250,225,.95)'); g.addColorStop(0.15, 'rgba(255,245,210,.45)'); g.addColorStop(1, 'rgba(255,240,200,0)');
-      ctx.fillStyle = g; ctx.fillRect(p.x - r * 3, p.y - r * 3, r * 6, r * 6);
+    const jump = (S.crowdJump || 0) > 0 ? Math.abs(Math.sin(S.time * 11)) * 0.35 * Math.min(1, S.crowdJump) : 0;
+    const bt = ST.backTop, rf = ST.roofFront, rb = ST.roofBack, H2 = ST.backHalf, sr = ST.sideRoof;
+
+    // --- fundo atrás do gol: parede de concreto e telão
+    fillPoly([v3(-H2, bt.y - 1, bt.z), v3(H2, bt.y - 1, bt.z), v3(H2, rb.y, rb.z), v3(-H2, rb.y, rb.z)], '#0d1016');
+    fillPoly([v3(-13, bt.y + 0.2, bt.z - 0.6), v3(13, bt.y + 0.2, bt.z - 0.6), v3(13, bt.y + 7, bt.z - 0.6), v3(-13, bt.y + 7, bt.z - 0.6)], '#20242c');
+    paintScreen(TEX.screen);
+    texturedWall(TEX.screen, -12.2, 12.2, v3(0, bt.y + 0.6, bt.z - 0.7), v3(0, bt.y + 6.6, bt.z - 0.7), 12);
+
+    // --- cobertura atrás do gol: parte de baixo com treliças e beiral branco
+    fillPoly([v3(-sr.x1, rf.y, rf.z), v3(sr.x1, rf.y, rf.z), v3(sr.x1, rb.y, rb.z), v3(-sr.x1, rb.y, rb.z)], '#2a2f38');
+    for (let x = -60; x <= 60; x += 6) {
+      line3(v3(x, rf.y, rf.z), v3(x, rb.y, rb.z), (k) => Math.max(1, k * 0.25), 'rgba(200,206,216,.35)');
+      line3(v3(x, rf.y, rf.z), v3(x + 6, rb.y, rb.z), (k) => Math.max(0.6, k * 0.12), 'rgba(200,206,216,.18)');
     }
-    // flashes de câmera na torcida
-    for (let i = 0; i < 4; i++) {
-      if (Math.random() > 0.35) continue;
-      const p = proj(v3((Math.random() * 2 - 1) * 60, 2 + Math.random() * 14, -10 - Math.random() * 20));
+    fillPoly([v3(-sr.x1, rf.y - 1.8, rf.z), v3(sr.x1, rf.y - 1.8, rf.z), v3(sr.x1, rf.y + 0.4, rf.z), v3(-sr.x1, rf.y + 0.4, rf.z)], '#d9dde3');
+
+    // --- arquibancada atrás do gol
+    texturedWall(TEX.crowd, -H2, H2, v3(0, 1.3 + jump * 0.5, ST.backFront - 0.6), v3(0, bt.y + jump, bt.z), 48);
+    fillPoly([v3(-H2, 0, ST.backFront), v3(H2, 0, ST.backFront), v3(H2, 1.4, ST.backFront - 0.4), v3(-H2, 1.4, ST.backFront - 0.4)], '#16191f');
+
+    // --- laterais (os dois lados)
+    for (const sx of [-1, 1]) {
+      const z0 = ST.sideZ0, z1 = ST.sideZ1, lo = ST.lower, bx = ST.boxes, up = ST.upper;
+      // cobertura lateral (vista de baixo)
+      fillPoly([v3(sx * sr.x0, sr.y0, rf.z), v3(sx * sr.x0, sr.y0, z1), v3(sx * sr.x1, sr.y1, z1), v3(sx * sr.x1, sr.y1, rf.z)], '#2a2f38');
+      // anel superior
+      texturedQuad(TEX.crowdSide, v3(sx * bx.x, bx.y1, z0), v3(sx * bx.x, bx.y1, z1), v3(sx * up.x, up.y, z0), v3(sx * up.x, up.y, z1), 40);
+      // camarotes envidraçados
+      fillPoly([v3(sx * bx.x, bx.y0, z0), v3(sx * bx.x, bx.y0, z1), v3(sx * bx.x, bx.y1, z1), v3(sx * bx.x, bx.y1, z0)], '#1b2230');
+      fillPoly([v3(sx * (bx.x - 0.05), bx.y0 + 1.2, z0), v3(sx * (bx.x - 0.05), bx.y0 + 1.2, z1), v3(sx * (bx.x - 0.05), bx.y1 - 0.6, z1), v3(sx * (bx.x - 0.05), bx.y1 - 0.6, z0)], 'rgba(255,214,150,.28)');
+      // anel inferior + muro
+      texturedQuad(TEX.crowdSide, v3(sx * ST.sideIn, 1.3, z0), v3(sx * ST.sideIn, 1.3, z1), v3(sx * lo.x, lo.y, z0), v3(sx * lo.x, lo.y, z1), 40);
+      fillPoly([v3(sx * (ST.sideIn - 0.3), 0, z0), v3(sx * (ST.sideIn - 0.3), 0, z1), v3(sx * (ST.sideIn - 0.3), 1.35, z1), v3(sx * (ST.sideIn - 0.3), 1.35, z0)], '#16191f');
+      // beiral branco da cobertura lateral
+      fillPoly([v3(sx * sr.x0, sr.y0 - 1.6, rf.z), v3(sx * sr.x0, sr.y0 - 1.6, z1), v3(sx * sr.x0, sr.y0 + 0.4, z1), v3(sx * sr.x0, sr.y0 + 0.4, rf.z)], '#d9dde3');
+    }
+
+    // --- refletores no beiral (anel de luz), brilho do telão e flashes de celular
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    glow(v3(0, bt.y + 3.6, bt.z - 0.5), 14, (S.crowdJump || 0) > 0 ? '255,255,255' : '120,150,220', 0.16);
+    for (let x = -58; x <= 58; x += 5) glow(v3(x, rf.y - 2, rf.z + 0.2), 5, '255,248,225', 0.55);
+    for (const sx of [-1, 1]) for (let z = rf.z + 4; z <= 60; z += 6) glow(v3(sx * sr.x0, sr.y0 - 1.9, z), 5, '255,248,225', 0.5);
+    for (let i = 0; i < 5; i++) {
+      if (Math.random() > 0.4) continue;
+      const t = Math.random();
+      const p = proj(v3((Math.random() * 2 - 1) * 50, lerp(2, bt.y, t), lerp(ST.backFront, bt.z, t)));
       if (!p) continue;
       ctx.fillStyle = 'rgba(255,255,255,.9)';
       ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, p.s * 0.15), 0, Math.PI * 2); ctx.fill();
     }
+    ctx.restore();
   }
   function drawPitch() {
     // gramado com faixas de corte
-    fillPoly([v3(-120, 0, -9), v3(120, 0, -9), v3(120, 0, 90), v3(-120, 0, 90)], '#1f5a33');
-    for (let i = 0, z = -9; z < 90; z += 4.5, i++) {
-      if (i % 2) fillPoly([v3(-120, 0, z), v3(120, 0, z), v3(120, 0, z + 4.5), v3(-120, 0, z + 4.5)], '#256a3c');
+    fillPoly([v3(-40, 0, -7), v3(40, 0, -7), v3(40, 0, 90), v3(-40, 0, 90)], '#1c5530');
+    for (let i = 0, z = -7; z < 90; z += 5.5, i++) {
+      if (i % 2) fillPoly([v3(-40, 0, z), v3(40, 0, z), v3(40, 0, z + 5.5), v3(-40, 0, z + 5.5)], '#22653a');
     }
+    // faixa de grama sem corte em volta do campo
+    fillPoly([v3(-40, 0, -7), v3(-36, 0, -7), v3(-36, 0, 90), v3(-40, 0, 90)], '#1a4a2c');
+    fillPoly([v3(36, 0, -7), v3(40, 0, -7), v3(40, 0, 90), v3(36, 0, 90)], '#1a4a2c');
     // linhas
     groundLine(-34, 0, 34, 0);
     groundLine(-34, 0, -34, 60); groundLine(34, 0, 34, 60);
@@ -563,7 +698,7 @@ if (typeof window !== 'undefined') (() => {
       }
     }
     // placas de publicidade
-    texturedWall(TEX.boards, -40, 40, v3(0, 0, -5), v3(0, 0.95, -5), 32);
+    texturedWall(TEX.boards, -36, 36, v3(0, 0, -4.5), v3(0, 0.95, -4.5), 32);
   }
   function circlePts(x, z, r, n = 10) {
     const pts = [];
@@ -954,7 +1089,7 @@ if (typeof window !== 'undefined') (() => {
     if (final) {
       const dur = Math.max(70, b.t - a.t);
       const hps = (chord / Hc) / (dur / 1000);
-      speed = clamp(15 + hps * 7.5, 16, 34);
+      speed = clamp(16 + hps * 8, 17, 36);      // 61 a 130 km/h
     }
     return { target, spin, speed, curv };
   }
@@ -1015,11 +1150,13 @@ if (typeof window !== 'undefined') (() => {
   function shoot(aim) {
     const k = S.kick;
     const B = v3(k.ball.x, P.R, k.ball.z);
-    const sol = P.solveLaunch(B, aim.target, aim.speed, aim.spin);
+    const w = P.spinVector(aim.spin, aim.speed);
+    const sol = P.solveLaunch(B, aim.target, aim.speed, w);
     // imprecisão humana: maior com chute forte e muito efeito
-    const err = 0.005 + 0.0007 * (aim.speed - 16) + 0.006 * Math.abs(aim.spin) / P.MAX_SPIN;
+    const err = 0.005 + 0.0008 * (aim.speed - 17) + 0.006 * Math.abs(aim.spin) / P.MAX_SPIN;
     const yaw = sol.yaw + P.gauss() * err, pitch = sol.pitch + P.gauss() * err * 0.7;
-    const launch = { p: B, v: P.launchVel(aim.speed, yaw, pitch), w: v3(0, aim.spin * (1 + P.gauss() * 0.05), 0) };
+    const wReal = P.mul(w, 1 + P.gauss() * 0.05);
+    const launch = { p: B, v: P.launchVel(aim.speed, yaw, pitch), w: wReal, kn: P.knuckle(wReal, aim.speed) };
     S.keeper = P.keeperPlan(k, S.keeper.x0, launch, difficulty(S.index));
     S.shot = P.createShot(k, S.wall.players, S.keeper, launch);
     S.curveTrail = Math.abs(aim.spin) > 20;
@@ -1028,7 +1165,7 @@ if (typeof window !== 'undefined') (() => {
     hideHint();
     sfx.kick();
     const kmh = Math.round(aim.speed * 3.6);
-    const curve = aim.spin === 0 ? 'sem efeito' : `efeito ${aim.spin > 0 ? '↶ para a esquerda' : '↷ para a direita'}`;
+    const curve = launch.kn ? 'bola flutuante' : aim.spin === 0 ? 'chute seco' : `efeito ${aim.spin > 0 ? '↶ para a esquerda' : '↷ para a direita'}`;
     ui.stats.innerHTML = `<b>${kmh}</b> km/h · ${curve}`;
     ui.stats.className = 'shot-stats show';
   }
@@ -1143,20 +1280,24 @@ if (typeof window !== 'undefined') (() => {
     S.flash = Math.max(0, S.flash - realDt * 2.5);
     S.postShake = Math.max(0, (S.postShake || 0) - realDt * 2);
     S.fade = Math.max(0, (S.fade || 0) - realDt * 2.2);
+    S.crowdJump = Math.max(0, (S.crowdJump || 0) - realDt);
 
     if (S.kick) updateCamera(realDt);
 
     if ((S.phase === 'flight' || S.phase === 'result') && S.shot) {
       const sh = S.shot;
-      // câmera lenta perto do gol
-      const near = S.phase === 'flight' && sh.p.z < 7 && sh.p.z > -0.5 && sh.v.z < 0;
-      S.timeScale = lerp(S.timeScale, near ? 0.38 : 1, 1 - Math.exp(-realDt * 10));
+      // voo em tempo real; câmera lenta curta só no lance decisivo (gol, trave, defesa)
+      S.slowmo = Math.max(0, (S.slowmo || 0) - realDt);
+      const target = S.slowmo > 0 ? 0.3 : 1;
+      S.timeScale = lerp(S.timeScale, target, 1 - Math.exp(-realDt * (target < 1 ? 25 : 4)));
       let simDt = realDt * S.timeScale;
       while (simDt > 1e-6) {
         const dt = Math.min(P.DT, simDt); simDt -= dt;
         P.stepShot(sh, dt);
       }
-      S.ballSpin += (P.len(sh.v) * 0.12 + sh.w.y * 0.02) * realDt * S.timeScale * 6;
+      // giro visual limitado (rotação real de ~10 voltas/s viraria efeito estroboscópico)
+      const rollRate = sh.p.y <= P.R + 0.01 ? P.len(sh.v) / P.R : P.len(sh.w);
+      S.ballSpin += clamp(rollRate, 4, 24) * realDt * S.timeScale;
       S.trail.push({ ...sh.p }); if (S.trail.length > 26) S.trail.shift();
       for (const ev of sh.events) handleEvent(ev);
       sh.events.length = 0;
@@ -1171,11 +1312,14 @@ if (typeof window !== 'undefined') (() => {
 
   function handleEvent(ev) {
     switch (ev.type) {
-      case 'post': sfx.post(); S.shake = 1; S.postShake = 1; break;
+      case 'post': sfx.post(); S.shake = 1; S.postShake = 1; S.slowmo = 0.55; break;
       case 'wall': sfx.thud(); S.shake = 0.4; break;
-      case 'keeper': sfx.thud(); S.shake = 0.5; break;
+      case 'keeper': sfx.thud(); S.shake = 0.5; S.slowmo = 0.55; break;
       case 'net': S.netHit = { x: ev.p.x, y: ev.p.y, t: S.time, force: Math.min(30, ev.force) }; break;
-      case 'outcome': if (S.phase === 'flight') resolve(ev.outcome); break;
+      case 'outcome':
+        if (ev.outcome === 'goal') { S.slowmo = 0.7; S.crowdJump = 2.4; }
+        if (S.phase === 'flight') resolve(ev.outcome);
+        break;
       default: break;
     }
   }
@@ -1189,7 +1333,7 @@ if (typeof window !== 'undefined') (() => {
     if (S.shot && (S.phase === 'flight' || S.phase === 'result')) {
       // leve acompanhamento da bola
       const b = S.shot.p;
-      const k = clamp(S.shot.t / 1.2, 0, 1) * 0.18;
+      const k = clamp(S.shot.t / 1.0, 0, 1) * 0.28;
       look = v3(lerp(look.x, b.x, k), lerp(look.y, b.y, k * 0.5), look.z);
       pos = P.add(pos, P.mul(P.sub(v3(0, 1.6, 0), pos), k * 0.25));
     }
@@ -1228,7 +1372,7 @@ if (typeof window !== 'undefined') (() => {
   syncMute();
 
   // Cena de fundo atrás da tela inicial
-  TEX.crowd = makeCrowd(); TEX.boards = makeBoards();
+  TEX.crowd = makeCrowd(2600, 56, 4); TEX.crowdSide = makeCrowd(2000, 30, 3); TEX.boards = makeBoards(); TEX.screen = makeScreen();
   window.addEventListener('resize', resize);
   S.kick = P.makeKick(0); S.wall = P.buildWall(S.kick); S.keeper = P.keeperIdle(0);
   resize();
