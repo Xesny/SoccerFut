@@ -2,196 +2,91 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#102b24" />
-  <title>Chute no Gol — Desafio do Pênalti</title>
-    <link rel="stylesheet" href="style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#05070d" />
+  <title>Chute no Gol — Cobranças de Falta</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <main class="game">
-    <section class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="introTitle">
-      <div class="intro-card">
-        <div class="intro-ball" aria-hidden="true">⚽</div>
-        <p class="eyebrow">DESAFIO DO PÊNALTI</p>
-        <h2 id="introTitle">Pronto para marcar?</h2>
-        <p class="intro-copy">Escolha seu país. As cores da camisa do seu personagem vão representar seu time.</p>
-        <div class="theme-setting" role="group" aria-label="Tema do jogo">
-          <span>Tema</span><div class="theme-options"><button class="theme-choice active" type="button" data-theme-choice="light" aria-pressed="true">☀️ Claro</button><button class="theme-choice" type="button" data-theme-choice="dark" aria-pressed="false">🌙 Escuro</button></div>
+  <main class="app">
+    <canvas id="game" aria-label="Campo: deslize a bola em direção ao gol para chutar"></canvas>
+
+    <!-- HUD -->
+    <div class="hud" id="hud" hidden>
+      <div class="hud-top">
+        <div class="panel kick">
+          <span class="flag" id="hudFlag"></span>
+          <div>
+            <div class="kick-no" id="kickNo">Cobrança 1/5</div>
+            <div class="kick-desc" id="kickDesc">Falta</div>
+          </div>
         </div>
-        <div class="country-grid" role="group" aria-label="Escolha seu país">
-          <button class="country selected" type="button" data-country="Brasil" data-kit="#e1bd36" data-trim="#16824a" aria-pressed="true"><span class="flag">🇧🇷</span><span>Brasil</span></button>
-          <button class="country" type="button" data-country="Argentina" data-kit="#7bc6df" data-trim="#f5f0df" aria-pressed="false"><span class="flag">🇦🇷</span><span>Argentina</span></button>
-          <button class="country" type="button" data-country="França" data-kit="#3155a4" data-trim="#f4f0df" aria-pressed="false"><span class="flag">🇫🇷</span><span>França</span></button>
-          <button class="country" type="button" data-country="Portugal" data-kit="#21804d" data-trim="#c83d36" aria-pressed="false"><span class="flag">🇵🇹</span><span>Portugal</span></button>
-          <button class="country" type="button" data-country="Japão" data-kit="#f3f0e8" data-trim="#c93e46" aria-pressed="false"><span class="flag">🇯🇵</span><span>Japão</span></button>
-          <button class="country" type="button" data-country="Alemanha" data-kit="#d8bf43" data-trim="#242b2a" aria-pressed="false"><span class="flag">🇩🇪</span><span>Alemanha</span></button>
+        <div class="hud-right">
+          <div class="panel score">
+            <div><small>Gols</small><b id="hudGoals">0</b></div>
+            <i></i>
+            <div><small>Pontos</small><b id="hudPoints">0</b></div>
+          </div>
+          <button class="icon-btn" id="muteBtn" type="button" aria-label="Desativar som">🔊</button>
+          <button class="icon-btn" id="restart" type="button" aria-label="Recomeçar série">↻</button>
         </div>
-        <button class="start-game" id="startGame" type="button">Começar jogo <span aria-hidden="true">→</span></button>
+      </div>
+      <div class="hud-sub">
+        <span class="team-name" id="hudTeam"></span>
+        <div class="dots" id="dots" aria-hidden="true"></div>
+      </div>
+
+      <div class="banner" id="banner" role="status" aria-live="polite">
+        <div class="banner-title" id="bannerTitle"></div>
+        <div class="banner-sub" id="bannerSub"></div>
+      </div>
+
+      <div class="shot-stats" id="shotStats"></div>
+      <div class="hint" id="hint">
+        <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 34 C 30 26, 30 14, 18 6" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="1 6"/><circle cx="20" cy="34" r="4" fill="currentColor"/></svg>
+        <span><b>Deslize a bola</b> em direção ao gol. Rápido = forte. <b>Faça uma curva</b> com o dedo para dar efeito.</span>
+      </div>
+    </div>
+
+    <!-- Tela inicial -->
+    <section class="overlay" id="intro" role="dialog" aria-modal="true" aria-labelledby="introTitle">
+      <div class="card">
+        <p class="eyebrow">Desafio de faltas</p>
+        <h1 id="introTitle">CHUTE<span>NO GOL</span></h1>
+        <ul class="howto">
+          <li><b>↗</b><span><strong>Deslize</strong> a bola para onde quer chutar</span></li>
+          <li><b>⚡</b><span><strong>Mais rápido</strong> = chute mais forte</span></li>
+          <li><b>↶</b><span><strong>Curve o gesto</strong> para a bola fazer a curva</span></li>
+        </ul>
+        <p class="label">Seu time</p>
+        <div class="country-grid" role="group" aria-label="Escolha seu time">
+          <button class="country selected" type="button" data-team="Brasil" aria-pressed="true"><span class="flag" style="background:radial-gradient(circle,#1e3f96 0 19%,transparent 20%),radial-gradient(ellipse 46% 40%,#fedf00 0 97%,transparent 100%),#009c3b"></span>Brasil</button>
+          <button class="country" type="button" data-team="Argentina" aria-pressed="false"><span class="flag" style="background:radial-gradient(circle,#f6b40e 0 11%,transparent 12%),linear-gradient(#74acdf 0 33%,#fff 33% 67%,#74acdf 67%)"></span>Argentina</button>
+          <button class="country" type="button" data-team="França" aria-pressed="false"><span class="flag" style="background:linear-gradient(90deg,#0055a4 0 33%,#fff 33% 67%,#ef4135 67%)"></span>França</button>
+          <button class="country" type="button" data-team="Portugal" aria-pressed="false"><span class="flag" style="background:radial-gradient(circle at 40% 50%,#ffd200 0 16%,transparent 17%),linear-gradient(90deg,#046a38 0 40%,#da291c 40%)"></span>Portugal</button>
+          <button class="country" type="button" data-team="Japão" aria-pressed="false"><span class="flag" style="background:radial-gradient(circle,#bc002d 0 27%,#fff 28%)"></span>Japão</button>
+          <button class="country" type="button" data-team="Alemanha" aria-pressed="false"><span class="flag" style="background:linear-gradient(#000 0 33%,#dd0000 33% 67%,#ffce00 67%)"></span>Alemanha</button>
+        </div>
+        <button class="primary" id="play" type="button">JOGAR <span aria-hidden="true">▶</span></button>
       </div>
     </section>
-    <header>
-      <div class="brand"><div class="brand-icon" aria-hidden="true">⚽</div><div><h1>Chute no Gol</h1><div class="subtitle">Desafio do pênalti</div></div></div>
-      <div class="header-actions"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Mudar para tema escuro">🌙 <span>Escuro</span></button><div class="scoreboard" aria-label="Placar"><div><div class="score-label">Gols</div><div class="score" id="goals">0</div></div><div class="divider"></div><div><div class="score-label">Chutes</div><div class="score" id="shots">0</div></div></div></div>
-    </header>
-    <section class="arena" aria-label="Campo de futebol">
-      <div class="topline"><span class="badge">🥅 &nbsp; <strong>Marque mais que o goleiro!</strong></span><span class="badge" id="round">PRONTO</span></div>
-      <div class="pitch" id="pitch">
-        <div class="stadium" aria-hidden="true"><div class="crowd"></div><div class="floodlight left"></div><div class="floodlight right"></div></div>
-        <div class="goal"><div class="net"></div></div><div class="goal-floor"></div>
-        <div class="keeper" id="keeper" aria-label="Goleiro"><div class="head"></div><div class="hair"></div><div class="body"></div><div class="arm left"></div><div class="arm right"></div><div class="glove left"></div><div class="glove right"></div></div>
-        <div class="impact" id="impact" hidden></div><div class="aim-line" id="aimLine" hidden></div>
-        <div class="ball" id="ball" role="button" aria-label="Arraste a bola para mirar e solte para chutar" tabindex="0"></div>
-        <div class="message" id="message" role="status" aria-live="polite"></div>
+
+    <!-- Resumo -->
+    <section class="overlay" id="summary" role="dialog" aria-modal="true" aria-labelledby="sumTitle" hidden>
+      <div class="card">
+        <p class="eyebrow">Fim da série</p>
+        <h2 id="sumTitle">Craque!</h2>
+        <div class="sum-stats">
+          <div><b id="sumGoals">0</b><small>gols de 5</small></div>
+          <div><b id="sumPoints">0</b><small>pontos</small></div>
+        </div>
+        <div class="dots dots-lg" id="sumDots" aria-hidden="true"></div>
+        <p class="sum-best" id="sumBest"></p>
+        <button class="primary" id="again" type="button">JOGAR DE NOVO <span aria-hidden="true">↻</span></button>
+        <button class="ghost" id="changeTeam" type="button">Trocar de time</button>
       </div>
-      <div class="controls"><div class="hint" id="hint"><b>Como jogar:</b> arraste a bola em direção ao gol e solte. Quanto mais longe você arrastar, mais forte o chute! Mire nos cantos. 🎯</div><div class="actions"><div class="power"><div class="power-label"><span>FORÇA</span><span id="powerText">—</span></div><div class="meter"><div class="meter-fill" id="powerFill"></div></div></div><button class="reset" id="reset" type="button">↻ &nbsp;Recomeçar</button></div></div>
     </section>
-    <footer>Arraste com o mouse ou toque na bola • O goleiro pode defender, mas nem sempre chega a tempo</footer>
   </main>
-  <script>
-    (() => {
-      const pitch = document.querySelector('#pitch');
-      const ball = document.querySelector('#ball');
-      const keeper = document.querySelector('#keeper');
-      const aimLine = document.querySelector('#aimLine');
-      const impact = document.querySelector('#impact');
-      const message = document.querySelector('#message');
-      const powerFill = document.querySelector('#powerFill');
-      const powerText = document.querySelector('#powerText');
-      const goalsEl = document.querySelector('#goals');
-      const shotsEl = document.querySelector('#shots');
-      const roundEl = document.querySelector('#round');
-      const hint = document.querySelector('#hint');
-      const intro = document.querySelector('#intro');
-      const themeToggle = document.querySelector('#themeToggle');
-      let selectedCountry = document.querySelector('.country.selected');
-      const start = { x: .5, y: .81 };
-      let dragging = false, busy = false, pointerId = null, goals = 0, shots = 0, roundTimer;
-
-      function setTheme(theme) {
-        document.body.dataset.theme = theme;
-        document.querySelectorAll('[data-theme-choice]').forEach(button => {
-          const active = button.dataset.themeChoice === theme;
-          button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active));
-        });
-        themeToggle.innerHTML = theme === 'dark' ? '☀️ <span>Claro</span>' : '🌙 <span>Escuro</span>';
-        themeToggle.setAttribute('aria-label', theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro');
-      }
-      document.querySelectorAll('[data-theme-choice]').forEach(button => button.addEventListener('click', () => setTheme(button.dataset.themeChoice)));
-      themeToggle.addEventListener('click', () => setTheme(document.body.dataset.theme === 'dark' ? 'light' : 'dark'));
-
-      document.querySelectorAll('.country').forEach(option => option.addEventListener('click', () => {
-        const previous = document.querySelector('.country.selected');
-        previous?.classList.remove('selected'); previous?.setAttribute('aria-pressed', 'false');
-        option.classList.add('selected'); option.setAttribute('aria-pressed', 'true'); selectedCountry = option;
-      }));
-      document.querySelector('#startGame').addEventListener('click', () => {
-        document.documentElement.style.setProperty('--kit', selectedCountry.dataset.kit);
-        document.documentElement.style.setProperty('--kit-trim', selectedCountry.dataset.trim);
-        document.querySelector('.badge').textContent = `⚽  Time ${selectedCountry.dataset.country}`;
-        intro.classList.add('dismissed');
-        setTimeout(() => intro.remove(), 300);
-      });
-
-      function placeBall(x = start.x, y = start.y) {
-        ball.style.left = `${x * 100}%`; ball.style.top = `${y * 100}%`;
-      }
-      function pos(event) {
-        const r = pitch.getBoundingClientRect();
-        return { x: (event.clientX - r.left) / r.width, y: (event.clientY - r.top) / r.height };
-      }
-      function setAim(p) {
-        const dx = p.x - start.x, dy = p.y - start.y;
-        const pull = Math.hypot(dx, dy), angle = Math.atan2(dy, dx) * 180 / Math.PI;
-        const length = Math.min(175, Math.max(0, pull * pitch.clientWidth));
-        aimLine.hidden = length < 3; aimLine.style.width = `${length}px`;
-        aimLine.style.transform = `rotate(${angle}deg)`;
-        const strength = Math.min(100, Math.round(pull * 210));
-        powerFill.style.width = `${strength}%`; powerText.textContent = strength ? `${strength}%` : '—';
-      }
-      function resetRound() {
-        clearTimeout(roundTimer); busy = false; dragging = false; pointerId = null;
-        placeBall(); keeper.className = 'keeper'; keeper.style.left = '50%';
-        aimLine.hidden = true; impact.hidden = true; message.className = 'message';
-        powerFill.style.width = '0'; powerText.textContent = '—'; roundEl.textContent = 'PRONTO';
-        ball.style.visibility = 'visible'; hint.innerHTML = '<b>Como jogar:</b> arraste a bola em direção ao gol e solte. Quanto mais longe você arrastar, mais forte o chute! Mire nos cantos. 🎯';
-      }
-      function shoot(p) {
-        const dx = p.x - start.x, dy = p.y - start.y;
-        const pull = Math.hypot(dx, dy);
-        const forward = -dy;
-        if (pull < .035 || forward < .08) { aimLine.hidden = true; powerFill.style.width = '0'; powerText.textContent = '—'; placeBall(); return; }
-        busy = true; shots++; shotsEl.textContent = shots; roundEl.textContent = 'CHUTANDO';
-        const strength = Math.min(1, pull * 1.45);
-        // The release vector determines where the ball crosses the goal line.
-        const t = (start.y - .19) / Math.max(.08, forward);
-        const targetX = start.x + dx * t;
-        const targetY = Math.max(.09, Math.min(.31, .35 - forward * .30));
-        // Leave room for the post and the ball's visible radius at the goal line.
-        const goalEdge = (.14 * pitch.clientWidth + 7 + 7.2) / pitch.clientWidth;
-        const inside = targetX >= goalEdge && targetX <= 1 - goalEdge;
-        const weak = strength < .3;
-        const travel = 430 + (1 - strength) * 510;
-        const keeperStartX = .5;
-        const horizontalGap = Math.abs(targetX - keeperStartX);
-        const keeperReach = Math.max(.10, Math.min(.37, (travel - 150) / 1000 * .48));
-        const heightGap = Math.max(0, .12 - targetY, targetY - .29);
-        const canReach = horizontalGap <= keeperReach && heightGap < .11;
-        const saveChance = canReach ? Math.max(.06, .86 - horizontalGap / keeperReach * .48 - heightGap * 2.2) : 0;
-        const saved = inside && Math.random() < saveChance;
-        const keeperLandingX = keeperStartX + Math.sign(targetX - keeperStartX) * Math.min(horizontalGap, keeperReach);
-        const diveDir = targetX < keeperStartX ? 'dive-left' : 'dive-right';
-        keeper.style.left = `${keeperLandingX * 100}%`;
-        keeper.classList.add(diveDir);
-        const destX = Math.max(.04, Math.min(.96, targetX));
-        const ballRect = pitch.getBoundingClientRect();
-        const fromX = start.x * ballRect.width, fromY = start.y * ballRect.height;
-        const toX = destX * ballRect.width, toY = targetY * ballRect.height;
-        const anim = ball.animate([
-          { left: `${fromX}px`, top: `${fromY}px`, transform: 'translate(-50%,-50%) scale(1)', offset: 0 },
-          { left: `${fromX + (toX-fromX)*.55}px`, top: `${fromY + (toY-fromY)*.55}px`, transform: 'translate(-50%,-50%) scale(.62)', offset: .58 },
-          { left: `${toX}px`, top: `${toY}px`, transform: 'translate(-50%,-50%) scale(.3)', offset: 1 }
-        ], { duration: travel, easing: 'cubic-bezier(.25,.6,.25,1)', fill: 'forwards' });
-        anim.onfinish = () => {
-          impact.hidden = false; impact.style.left = `${destX * 100}%`; impact.style.top = `${targetY * 100}%`;
-          ball.style.visibility = 'hidden';
-          if (!inside) {
-            message.textContent = 'PRA FORA!'; message.style.color = '#f2d88c'; roundEl.textContent = 'FORA';
-            hint.innerHTML = '<b>Foi por pouco!</b> Ajuste a mira para a bola passar entre as traves.';
-          } else if (saved) {
-            keeper.classList.remove(diveDir); keeper.classList.add('save');
-            message.textContent = weak ? 'DEFESA! CHUTE FRACO' : 'DEFENDEU!';
-            message.style.color = '#f2d88c'; roundEl.textContent = 'DEFESA';
-            hint.innerHTML = '<b>O goleiro chegou na bola!</b> Tente variar a força e o canto do próximo chute.';
-          } else {
-            goals++; goalsEl.textContent = goals;
-            message.textContent = 'GOOOOL! ⚽'; message.style.color = 'var(--accent)'; roundEl.textContent = 'GOL';
-            hint.innerHTML = '<b>Golaço!</b> O goleiro não alcançou. Bora marcar mais um?';
-          }
-          message.classList.add('show');
-          // Clear the filled animation so the next round can place the ball normally.
-          anim.cancel();
-          roundTimer = setTimeout(resetRound, 1250);
-        };
-      }
-      ball.addEventListener('pointerdown', event => {
-        if (busy) return;
-        dragging = true; pointerId = event.pointerId; ball.setPointerCapture(pointerId); setAim(pos(event));
-      });
-      ball.addEventListener('pointermove', event => { if (dragging && event.pointerId === pointerId) setAim(pos(event)); });
-      ball.addEventListener('pointerup', event => {
-        if (!dragging || event.pointerId !== pointerId) return;
-        dragging = false; ball.releasePointerCapture(pointerId); pointerId = null; shoot(pos(event));
-      });
-      ball.addEventListener('pointercancel', () => { dragging = false; pointerId = null; aimLine.hidden = true; powerFill.style.width = '0'; powerText.textContent = '—'; });
-      ball.addEventListener('keydown', event => {
-        if (busy || !['Enter',' '].includes(event.key)) return;
-        event.preventDefault(); shoot({ x: .61, y: .25 });
-      });
-      document.querySelector('#reset').addEventListener('click', () => {
-        if (ball.getAnimations) ball.getAnimations().forEach(animation => animation.cancel());
-        goals = 0; shots = 0; goalsEl.textContent = '0'; shotsEl.textContent = '0'; resetRound();
-      });
-    })();
-  </script>
+  <script src="script.js"></script>
 </body>
 </html>
